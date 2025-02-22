@@ -461,7 +461,7 @@ constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt) {
                       write_integer<Endian, Result>(static_cast<std::int32_t>(
                           nbt.template as<typename Nbt::list_t>().size())));
     for (const auto &element : nbt.template as<typename Nbt::list_t>())
-      res = concat(res, write_type<Endian>(element));
+      res = concat(res, write_no_type<Endian>(element));
     return res;
   }
   case nbt_type::compound: {
@@ -559,9 +559,11 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
   }
   case nbt_type::list: {
     auto type = read_type(begin);
-    typename Nbt::list_t list(read_integer<Endian, std::int32_t>(begin));
+    auto size = read_integer<Endian, std::int32_t>(begin);
+    std::cout << (int)type << " " << size << '\n';
+    typename Nbt::list_t list(size);
     for (auto &element : list) {
-      element = read_type<Endian, Nbt>(begin, end);
+      element = read_no_type<Endian, Nbt>(begin, end, type);
     }
     return list;
   }
