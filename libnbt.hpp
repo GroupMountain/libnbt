@@ -560,7 +560,6 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
   case nbt_type::list: {
     auto type = read_type(begin);
     auto size = read_integer<Endian, std::int32_t>(begin);
-    std::cout << (int)type << " " << size << '\n';
     typename Nbt::list_t list(size);
     for (auto &element : list) {
       element = read_no_type<Endian, Nbt>(begin, end, type);
