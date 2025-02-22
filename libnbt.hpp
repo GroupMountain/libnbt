@@ -190,17 +190,17 @@ struct nbt_node {
       return float32;
     else if constexpr (std::is_same_v<T, decltype(float64)>)
       return float64;
-    else if constexpr (std::is_same_v<T, decltype(*int8list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int8_t>>)
       return *int8list;
-    else if constexpr (std::is_same_v<T, decltype(*string)>)
+    else if constexpr (std::is_same_v<T, String>)
       return *string;
-    else if constexpr (std::is_same_v<T, decltype(*list)>)
+    else if constexpr (std::is_same_v<T, Array<nbt_node>>)
       return *list;
-    else if constexpr (std::is_same_v<T, decltype(*compound)>)
+    else if constexpr (std::is_same_v<T, Map<String, nbt_node>>)
       return *compound;
-    else if constexpr (std::is_same_v<T, decltype(*int32list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int32_t>>)
       return *int32list;
-    else if constexpr (std::is_same_v<T, decltype(*int64list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
     std::unreachable();
   }
@@ -254,17 +254,17 @@ struct nbt_node {
       return float32;
     else if constexpr (std::is_same_v<T, decltype(float64)>)
       return float64;
-    else if constexpr (std::is_same_v<T, decltype(*int8list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int8_t>>)
       return *int8list;
-    else if constexpr (std::is_same_v<T, decltype(*string)>)
+    else if constexpr (std::is_same_v<T, String>)
       return *string;
-    else if constexpr (std::is_same_v<T, decltype(*list)>)
+    else if constexpr (std::is_same_v<T, Array<nbt_node>>)
       return *list;
-    else if constexpr (std::is_same_v<T, decltype(*compound)>)
+    else if constexpr (std::is_same_v<T, Map<String, nbt_node>>)
       return *compound;
-    else if constexpr (std::is_same_v<T, decltype(*int32list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int32_t>>)
       return *int32list;
-    else if constexpr (std::is_same_v<T, decltype(*int64list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
     std::unreachable();
   }
@@ -286,17 +286,17 @@ struct nbt_node {
       return float32;
     else if constexpr (std::is_same_v<T, decltype(float64)>)
       return float64;
-    else if constexpr (std::is_same_v<T, decltype(*int8list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int8_t>>)
       return *int8list;
-    else if constexpr (std::is_same_v<T, decltype(*string)>)
+    else if constexpr (std::is_same_v<T, String>)
       return *string;
-    else if constexpr (std::is_same_v<T, decltype(*list)>)
+    else if constexpr (std::is_same_v<T, Array<nbt_node>>)
       return *list;
-    else if constexpr (std::is_same_v<T, decltype(*compound)>)
+    else if constexpr (std::is_same_v<T, Map<String, nbt_node>>)
       return *compound;
-    else if constexpr (std::is_same_v<T, decltype(*int32list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int32_t>>)
       return *int32list;
-    else if constexpr (std::is_same_v<T, decltype(*int64list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
     std::unreachable();
   }
