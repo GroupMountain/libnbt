@@ -558,8 +558,8 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
     return string;
   }
   case nbt_type::list: {
+    auto type = read_type(begin);
     typename Nbt::list_t list(read_integer<Endian, std::int32_t>(begin));
-    read_type(begin);
     for (auto &element : list) {
       element = read_type<Endian, Nbt>(begin, end);
     }
@@ -569,13 +569,13 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
     typename Nbt::compound_t compound;
     if (isRoot)
       read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
-    auto type = read_type(begin);
-    while (type != nbt_type::end) {
+    while (begin < end && *begin) {
+      auto type = read_type(begin);
       auto string = read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
       compound.insert({string.template as<typename Nbt::string_t>(),
                        read_no_type<Endian, Nbt>(begin, end, type)});
-      type = read_type(begin);
     }
+    begin++;
     return compound;
   }
   case nbt_type::int32list:
