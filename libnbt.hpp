@@ -4,8 +4,11 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
+#include <map>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 namespace libnbt {
 #define THROW(...) throw __VA_ARGS__
 enum class nbt_type : std::int8_t {
@@ -138,6 +141,51 @@ struct nbt_node {
       break;
     }
   }
+  constexpr nbt_node &operator=(const nbt_node &other) {
+    type = other.type;
+    switch (type) {
+    case nbt_type::end:
+      end = other.end;
+      break;
+    case nbt_type::int8:
+      int8 = other.int8;
+      break;
+    case nbt_type::int16:
+      int16 = other.int16;
+      break;
+    case nbt_type::int32:
+      int32 = other.int32;
+      break;
+    case nbt_type::int64:
+      int64 = other.int64;
+      break;
+    case nbt_type::float32:
+      float32 = other.float32;
+      break;
+    case nbt_type::float64:
+      float64 = other.float64;
+      break;
+    case nbt_type::int8list:
+      int8list = new Array<std::int8_t>(*other.int8list);
+      break;
+    case nbt_type::string:
+      string = new String(*other.string);
+      break;
+    case nbt_type::list:
+      list = new Array<nbt_node>(*other.list);
+      break;
+    case nbt_type::compound:
+      compound = new Map<String, nbt_node>(*other.compound);
+      break;
+    case nbt_type::int32list:
+      int32list = new Array<std::int32_t>(*other.int32list);
+      break;
+    case nbt_type::int64list:
+      int64list = new Array<std::int64_t>(*other.int64list);
+      break;
+    }
+    return *this;
+  }
   constexpr nbt_node(std::nullptr_t end = nullptr)
       : end(end), type(nbt_type::end) {}
   constexpr nbt_node(std::int8_t int8) : int8(int8), type(nbt_type::int8) {}
@@ -152,7 +200,8 @@ struct nbt_node {
   constexpr nbt_node(double float64)
       : float64(float64), type(nbt_type::float64) {}
   constexpr nbt_node(Array<std::int8_t> &&int8list)
-      : int8list(new Array<std::int8_t>(std::forward(int8list))),
+      : int8list(new Array<std::int8_t>(
+            std::forward<Array<std::int8_t> &&>(int8list))),
         type(nbt_type::int8list) {}
   constexpr nbt_node(String &&string)
       : string(new String(std::forward<String &&>(string))),
@@ -306,6 +355,7 @@ struct nbt_node {
   }
   constexpr nbt_type get_type() const { return type; }
 };
+namespace details {
 template <std::endian Endian, typename Array>
 constexpr void swap_if_need(Array &bytes) {
   if constexpr (std::endian::native != Endian) {
@@ -440,4 +490,171 @@ constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt) {
     std::unreachable();
   }
 }
+} // namespace details
+template <std::endian Endian, typename Nbt>
+constexpr Nbt::template array_t<unsigned char>
+write(const Nbt &nbt, const typename Nbt::string_t &name = "") {
+  return details::write_type<Endian>(nbt, true, name);
+}
+namespace details {
+template <std::endian Endian, std::integral Integral, typename Iter>
+Integral read_integer(Iter &begin) {
+  std::array<unsigned char, sizeof(Integral)> integer;
+  std::copy_n(begin, sizeof(Integral), integer.begin());
+  begin += sizeof(Integral);
+  swap_if_need<Endian>(integer);
+  return std::bit_cast<Integral>(integer);
+}
+template <std::endian Endian, std::floating_point Floating, typename Iter>
+Floating read_float(Iter &begin) {
+  std::array<unsigned char, sizeof(Floating)> floating;
+  std::copy_n(begin, sizeof(Floating), floating.begin());
+  begin += sizeof(Floating);
+  return std::bit_cast<Floating>(floating);
+}
+template <std::endian Endian, typename Result, typename Iter>
+Result read_array(Iter &begin) {
+  auto size = read_integer<Endian, std::int32_t>(begin);
+  Result res(size);
+  for (auto &element : res) {
+    element = read_integer<Endian, typename Result::value_type>(begin);
+  }
+  return res;
+}
+template <typename Iter> nbt_type read_type(Iter &begin) {
+  return std::bit_cast<nbt_type>(
+      read_integer<std::endian::native, std::int8_t>(begin));
+}
+template <std::endian Endian, typename Nbt, typename Iter>
+Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type,
+                 bool isRoot = false);
+template <std::endian Endian, typename Nbt, typename Iter>
+Nbt read_type(Iter &begin, const Iter &end, bool isRoot = false) {
+  return read_no_type<Endian, Nbt>(begin, end, read_type(begin), isRoot);
+}
+template <std::endian Endian, typename Nbt, typename Iter>
+Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
+  switch (type) {
+  case nbt_type::end:
+    return {};
+  case nbt_type::int8:
+    return {read_integer<Endian, std::int8_t>(begin)};
+  case nbt_type::int16:
+    return {read_integer<Endian, std::int16_t>(begin)};
+  case nbt_type::int32:
+    return {read_integer<Endian, std::int32_t>(begin)};
+  case nbt_type::int64:
+    return {read_integer<Endian, std::int64_t>(begin)};
+  case nbt_type::float32:
+    return {read_float<Endian, float>(begin)};
+  case nbt_type::float64:
+    return {read_float<Endian, double>(begin)};
+  case nbt_type::int8list:
+    return {read_array<Endian, typename Nbt::int8list_t>(begin)};
+  case nbt_type::string: {
+    typename Nbt::string_t string(read_integer<Endian, std::int16_t>(begin), 0);
+    for (auto &c : string)
+      c = read_integer<Endian, typename Nbt::string_t::value_type>(begin);
+    return string;
+  }
+  case nbt_type::list: {
+    typename Nbt::list_t list(read_integer<Endian, std::int32_t>(begin));
+    read_type(begin);
+    for (auto &element : list) {
+      element = read_type<Endian, Nbt>(begin, end);
+    }
+    return list;
+  }
+  case nbt_type::compound: {
+    typename Nbt::compound_t compound;
+    if (isRoot)
+      read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
+    auto type = read_type(begin);
+    while (type != nbt_type::end) {
+      auto string = read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
+      compound.insert({string.template as<typename Nbt::string_t>(),
+                       read_no_type<Endian, Nbt>(begin, end, type)});
+      type = read_type(begin);
+    }
+    return compound;
+  }
+  case nbt_type::int32list:
+    return {read_array<Endian, typename Nbt::int32list_t>(begin)};
+  case nbt_type::int64list:
+    return {read_array<Endian, typename Nbt::int64list_t>(begin)};
+  default:
+    std::unreachable();
+  }
+}
+} // namespace details
+template <std::endian Endian, typename Nbt, typename Iter>
+Nbt read(Iter &begin, const Iter &end) {
+  return details::read_type<Endian, Nbt>(begin, end, true);
+}
+template <typename T> inline void print(const T &nbt) {
+  switch (nbt.get_type()) {
+  case nbt_type::int8:
+    std::cout << nbt.template as<std::int8_t>();
+    break;
+  case nbt_type::int16:
+    std::cout << nbt.template as<std::int16_t>();
+    break;
+  case nbt_type::int32:
+    std::cout << nbt.template as<std::int32_t>();
+    break;
+  case nbt_type::int64:
+    std::cout << nbt.template as<std::int64_t>();
+    break;
+  case nbt_type::float32:
+    std::cout << nbt.template as<float>();
+    break;
+  case nbt_type::float64:
+    std::cout << nbt.template as<double>();
+    break;
+  case nbt_type::string:
+    std::cout << "\"" << nbt.template as<typename T::string_t>() << "\"";
+    break;
+  case nbt_type::list:
+    std::cout << "[ ";
+    for (const auto &element : nbt.template as<typename T::list_t>()) {
+      print(element);
+      std::cout << " ";
+    }
+    std::cout << "]";
+    break;
+  case nbt_type::int8list:
+    std::cout << "[ ";
+    for (const auto &element : nbt.template as<typename T::int8list_t>()) {
+      std::cout << (std::int64_t)element << " ";
+    }
+    std::cout << "]";
+    break;
+  case nbt_type::int32list:
+    std::cout << "[ ";
+    for (const auto &element : nbt.template as<typename T::int32list_t>()) {
+      std::cout << (std::int64_t)element << " ";
+    }
+    std::cout << "]";
+    break;
+  case nbt_type::int64list:
+    std::cout << "[ ";
+    for (const auto &element : nbt.template as<typename T::int64list_t>()) {
+      std::cout << (std::int64_t)element << " ";
+    }
+    std::cout << "]";
+    break;
+  case nbt_type::compound:
+    std::cout << "{\n";
+    for (const auto &[k, v] : nbt.template as<typename T::compound_t>()) {
+      std::cout << "\"" << k << "\" : ";
+      print(v);
+      std::cout << "\n";
+    }
+    std::cout << "}";
+    break;
+  default:
+    break;
+  }
+}
+using nbt = libnbt::nbt_node<std::map, std::vector, std::string>;
 } // namespace libnbt
