@@ -222,17 +222,17 @@ struct nbt_node {
       return float32;
     else if constexpr (std::is_same_v<T, decltype(float64)>)
       return float64;
-    else if constexpr (std::is_same_v<T, decltype(*int8list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int8_t>>)
       return *int8list;
-    else if constexpr (std::is_same_v<T, decltype(*string)>)
+    else if constexpr (std::is_same_v<T, String>)
       return *string;
-    else if constexpr (std::is_same_v<T, decltype(*list)>)
+    else if constexpr (std::is_same_v<T, Array<nbt_node>>)
       return *list;
-    else if constexpr (std::is_same_v<T, decltype(*compound)>)
+    else if constexpr (std::is_same_v<T, Map<String, nbt_node>>)
       return *compound;
-    else if constexpr (std::is_same_v<T, decltype(*int32list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int32_t>>)
       return *int32list;
-    else if constexpr (std::is_same_v<T, decltype(*int64list)>)
+    else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
     std::unreachable();
   }
@@ -359,13 +359,19 @@ Result write_array(const Array &array) {
 template <std::endian Endian, typename Nbt>
 constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt);
 template <std::endian Endian, typename Nbt>
-constexpr Nbt::template array_t<unsigned char> write_type(const Nbt &nbt,
-                                                          bool isRoot = false) {
-  if (isRoot)
-    return concat(write_type<Nbt::template array_t>(nbt.get_type()),
-                  typename Nbt::template array_t<unsigned char>{0, 0},
+constexpr Nbt::template array_t<unsigned char>
+write_type(const Nbt &nbt, bool isRoot = false,
+           const typename Nbt::string_t &name = "") {
+  if (isRoot) {
+    typename Nbt::template array_t<unsigned char> bytes(name.size());
+    std::copy(name.begin(), name.end(), bytes.begin());
+    bytes = concat(
+        write_integer<Endian, typename Nbt::template array_t<unsigned char>>(
+            static_cast<std::int16_t>(name.size())),
+        bytes);
+    return concat(write_type<Nbt::template array_t>(nbt.get_type()), bytes,
                   write_no_type<Endian>(nbt));
-  else
+  } else
     return concat(write_type<Nbt::template array_t>(nbt.get_type()),
                   write_no_type<Endian>(nbt));
 }
