@@ -595,7 +595,7 @@ Nbt read(Iter &begin, const Iter &end) {
 template <typename T> inline void print(const T &nbt) {
   switch (nbt.get_type()) {
   case nbt_type::int8:
-    std::cout << nbt.template as<std::int8_t>();
+    std::cout << (std::int64_t)nbt.template as<std::int8_t>();
     break;
   case nbt_type::int16:
     std::cout << nbt.template as<std::int16_t>();
