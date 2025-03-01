@@ -4,13 +4,21 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
 #include <map>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
+
 namespace libnbt {
+#ifndef THROW
 #define THROW(...) throw __VA_ARGS__
+#endif
+#if defined(_MSC_VER) && !defined(__clang__)
+#define UNREACHABLE() __assume(false)
+#else
+#define UNREACHABLE() __builtin_unreachable()
+#endif
 enum class nbt_type : std::int8_t {
   end,
   int8,
@@ -251,7 +259,7 @@ struct nbt_node {
       return *int32list;
     else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
-    std::unreachable();
+    UNREACHABLE();
   }
   template <typename T> const T &as() const {
     if (type_to_nbt_type<T> != type) {
@@ -283,7 +291,7 @@ struct nbt_node {
       return *int32list;
     else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
-    std::unreachable();
+    UNREACHABLE();
   }
   template <typename T> operator T &() {
     if (type_to_nbt_type<T> != type) {
@@ -315,7 +323,7 @@ struct nbt_node {
       return *int32list;
     else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
-    std::unreachable();
+    UNREACHABLE();
   }
   template <typename T> operator const T &() const {
     if (type_to_nbt_type<T> != type) {
@@ -347,7 +355,7 @@ struct nbt_node {
       return *int32list;
     else if constexpr (std::is_same_v<T, Array<std::int64_t>>)
       return *int64list;
-    std::unreachable();
+    UNREACHABLE();
   }
   constexpr bool is(auto type) const { return this->type == type; }
   template <typename T> constexpr bool is() const {
@@ -381,18 +389,19 @@ template <template <typename> typename Array>
 constexpr Array<unsigned char> write_type(nbt_type Type) {
   return {std::bit_cast<unsigned char>(Type)};
 }
-template <typename T, typename... Ts>
-constexpr auto concat(const T &a, const Ts &...rest) {
-  std::size_t size = a.size();
-  if constexpr (sizeof...(rest) != 0)
-    size += (rest.size() + ...);
-  T res(size);
+template <typename... Ts> constexpr auto concat(const Ts &...args) {
+  static_assert((std::is_same_v<std::remove_cvref_t<decltype((args, ...))>,
+                                std::remove_cvref_t<decltype((args))>> &&
+                 ...),
+                "args type is not same");
+  std::remove_cvref_t<decltype((args, ...))> res((args.size() + ...));
   std::size_t i = 0;
-  for (const auto &e : a)
-    res[i++] = e;
-  if constexpr (sizeof...(rest) != 0)
-    for (const auto &e : concat(rest...))
-      res[i++] = e;
+  (
+      [&](const auto &arg) {
+        for (const auto &element : arg)
+          res[i++] = element;
+      }(args),
+      ...);
   return res;
 }
 template <std::endian Endian, typename T, typename SizeType, typename Array,
@@ -460,8 +469,9 @@ constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt) {
                           nbt.template as<typename Nbt::list_t>()[0].type),
                       write_integer<Endian, Result>(static_cast<std::int32_t>(
                           nbt.template as<typename Nbt::list_t>().size())));
-    for (const auto &element : nbt.template as<typename Nbt::list_t>())
-      res = concat(res, write_no_type<Endian>(element));
+    if (nbt.template as<typename Nbt::list_t>()[0].type != nbt_type::end)
+      for (const auto &element : nbt.template as<typename Nbt::list_t>())
+        res = concat(res, write_no_type<Endian>(element));
     return res;
   }
   case nbt_type::compound: {
@@ -487,7 +497,7 @@ constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt) {
                        typename Nbt::int64list_t, Result>(
         nbt.template as<typename Nbt::int64list_t>());
   default:
-    std::unreachable();
+    UNREACHABLE();
   }
 }
 } // namespace details
@@ -560,11 +570,14 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
   case nbt_type::list: {
     auto type = read_type(begin);
     auto size = read_integer<Endian, std::int32_t>(begin);
-    typename Nbt::list_t list(size);
-    for (auto &element : list) {
-      element = read_no_type<Endian, Nbt>(begin, end, type);
+    if (type != nbt_type::end) {
+      typename Nbt::list_t list(size);
+      for (auto &element : list) {
+        element = read_no_type<Endian, Nbt>(begin, end, type);
+      }
+      return list;
     }
-    return list;
+    return typename Nbt::list_t{};
   }
   case nbt_type::compound: {
     typename Nbt::compound_t compound;
@@ -584,7 +597,7 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
   case nbt_type::int64list:
     return {read_array<Endian, typename Nbt::int64list_t>(begin)};
   default:
-    std::unreachable();
+    UNREACHABLE();
   }
 }
 } // namespace details
@@ -592,70 +605,83 @@ template <std::endian Endian, typename Nbt, typename Iter>
 Nbt read(Iter &begin, const Iter &end) {
   return details::read_type<Endian, Nbt>(begin, end, true);
 }
-template <typename T> inline void print(const T &nbt) {
+template <typename T> inline std::string to_string(const T &nbt) {
   switch (nbt.get_type()) {
   case nbt_type::int8:
-    std::cout << (std::int64_t)nbt.template as<std::int8_t>();
-    break;
+    return std::to_string((std::int64_t)nbt.template as<std::int8_t>()) + "b";
   case nbt_type::int16:
-    std::cout << nbt.template as<std::int16_t>();
-    break;
+    return std::to_string(nbt.template as<std::int16_t>()) + "s";
   case nbt_type::int32:
-    std::cout << nbt.template as<std::int32_t>();
-    break;
+    return std::to_string(nbt.template as<std::int32_t>());
   case nbt_type::int64:
-    std::cout << nbt.template as<std::int64_t>();
-    break;
+    return std::to_string(nbt.template as<std::int64_t>()) + "l";
   case nbt_type::float32:
-    std::cout << nbt.template as<float>();
-    break;
+    return std::to_string(nbt.template as<float>()) + "f";
   case nbt_type::float64:
-    std::cout << nbt.template as<double>();
-    break;
-  case nbt_type::string:
-    std::cout << "\"" << nbt.template as<typename T::string_t>() << "\"";
-    break;
-  case nbt_type::list:
-    std::cout << "[ ";
+    return std::to_string(nbt.template as<double>()) + "d";
+  case nbt_type::string: {
+    typename T::string_t res;
+    for (auto c : nbt.template as<typename T::string_t>())
+      if (c == '"') {
+        res += '\\';
+        res += c;
+      } else {
+        res += c;
+      }
+    return "\"" + res + "\"";
+  }
+  case nbt_type::list: {
+    std::string res;
     for (const auto &element : nbt.template as<typename T::list_t>()) {
-      print(element);
-      std::cout << " ";
+      res += to_string(element) + ",";
     }
-    std::cout << "]";
-    break;
-  case nbt_type::int8list:
-    std::cout << "[ ";
+    if (res.ends_with(","))
+      res.pop_back();
+    return "[" + res + "]";
+  }
+  case nbt_type::int8list: {
+    std::string res;
     for (const auto &element : nbt.template as<typename T::int8list_t>()) {
-      std::cout << (std::int64_t)element << " ";
+      res += std::to_string(element) + "b,";
     }
-    std::cout << "]";
-    break;
-  case nbt_type::int32list:
-    std::cout << "[ ";
+    if (res.ends_with(","))
+      res.pop_back();
+    return "[B;" + res + "]";
+  }
+  case nbt_type::int32list: {
+    std::string res;
     for (const auto &element : nbt.template as<typename T::int32list_t>()) {
-      std::cout << (std::int64_t)element << " ";
+      res += std::to_string(element) + ",";
     }
-    std::cout << "]";
-    break;
-  case nbt_type::int64list:
-    std::cout << "[ ";
+    if (res.ends_with(","))
+      res.pop_back();
+    return "[I;" + res + "]";
+  }
+  case nbt_type::int64list: {
+    std::string res;
     for (const auto &element : nbt.template as<typename T::int64list_t>()) {
-      std::cout << (std::int64_t)element << " ";
+      res += std::to_string(element) + "l,";
     }
-    std::cout << "]";
-    break;
-  case nbt_type::compound:
-    std::cout << "{\n";
-    for (const auto &[k, v] : nbt.template as<typename T::compound_t>()) {
-      std::cout << "\"" << k << "\" : ";
-      print(v);
-      std::cout << "\n";
+    if (res.ends_with(","))
+      res.pop_back();
+    return "[L;" + res + "]";
+  }
+  case nbt_type::compound: {
+    std::string res;
+    for (const auto &[index, element] :
+         nbt.template as<typename T::compound_t>()) {
+      res += "\"" + index + "\":" + to_string(element) + ",";
     }
-    std::cout << "}";
-    break;
+    if (res.ends_with(",")) {
+      res.pop_back();
+    }
+    return "{" + res + "}";
+  }
   default:
-    break;
+    UNREACHABLE();
   }
 }
 using nbt = libnbt::nbt_node<std::map, std::vector, std::string>;
+constexpr auto bedrock_endian = std::endian::little;
+constexpr auto java_endian = std::endian::big;
 } // namespace libnbt
