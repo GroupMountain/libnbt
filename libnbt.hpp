@@ -46,25 +46,37 @@ struct nbt_node {
   using int64list_t = array_t<std::int64_t>;
   using list_t = array_t<nbt_node>;
   using compound_t = map_t<string_t, nbt_node>;
+  template <typename T> constexpr static auto type_to_nbt_type_helper() {
+    if constexpr (std::is_same_v<std::nullptr_t, T>)
+      return nbt_type::end;
+    if constexpr (std::is_same_v<std::int8_t, T>)
+      return nbt_type::int8;
+    if constexpr (std::is_same_v<std::int16_t, T>)
+      return nbt_type::int16;
+    if constexpr (std::is_same_v<std::int32_t, T>)
+      return nbt_type::int32;
+    if constexpr (std::is_same_v<std::int64_t, T>)
+      return nbt_type::int64;
+    if constexpr (std::is_same_v<float, T>)
+      return nbt_type::float32;
+    if constexpr (std::is_same_v<double, T>)
+      return nbt_type::float64;
+    if constexpr (std::is_same_v<int8list_t, T>)
+      return nbt_type::int8list;
+    if constexpr (std::is_same_v<string_t, T>)
+      return nbt_type::string;
+    if constexpr (std::is_same_v<list_t, T>)
+      return nbt_type::list;
+    if constexpr (std::is_same_v<compound_t, T>)
+      return nbt_type::compound;
+    if constexpr (std::is_same_v<int32list_t, T>)
+      return nbt_type::int32list;
+    if constexpr (std::is_same_v<int64list_t, T>)
+      return nbt_type::int64list;
+  }
   template <typename T>
-  constexpr static auto type_to_nbt_type = [] { static_assert(false); }();
-  template <> constexpr auto type_to_nbt_type<std::nullptr_t> = nbt_type::end;
-  template <> constexpr auto type_to_nbt_type<std::int8_t> = nbt_type::int8;
-  template <> constexpr auto type_to_nbt_type<std::int16_t> = nbt_type::int16;
-  template <> constexpr auto type_to_nbt_type<std::int32_t> = nbt_type::int32;
-  template <> constexpr auto type_to_nbt_type<std::int64_t> = nbt_type::int64;
-  template <> constexpr auto type_to_nbt_type<float> = nbt_type::float32;
-  template <> constexpr auto type_to_nbt_type<double> = nbt_type::float64;
-  template <>
-  constexpr auto type_to_nbt_type<Array<std::int8_t>> = nbt_type::int8list;
-  template <> constexpr auto type_to_nbt_type<String> = nbt_type::string;
-  template <> constexpr auto type_to_nbt_type<Array<nbt_node>> = nbt_type::list;
-  template <>
-  constexpr auto type_to_nbt_type<Map<String, nbt_node>> = nbt_type::compound;
-  template <>
-  constexpr auto type_to_nbt_type<Array<std::int32_t>> = nbt_type::int32list;
-  template <>
-  constexpr auto type_to_nbt_type<Array<std::int64_t>> = nbt_type::int64list;
+  constexpr static auto type_to_nbt_type = type_to_nbt_type_helper<T>();
+
   nbt_type type;
   union {
     std::nullptr_t end;
