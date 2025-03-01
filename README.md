@@ -1,8 +1,11 @@
 ```cpp
+#define _CRT_SECURE_NO_WARNINGS
 #include "libnbt.hpp"
+#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
+
 int main() {
   libnbt::nbt node{{
       {"a", 1},
@@ -10,7 +13,7 @@ int main() {
       {"c",
        {{
            {"123", 1},
-           {"456", {{{"b", std::vector{2, 3, 4}}}}},
+           {"456", {{{"b", libnbt::nbt::int8list_t{2, 3, 4}}}}},
        }}},
       {"d", libnbt::nbt::list_t{libnbt::nbt::compound_t{
                 {"a", 1},
@@ -21,7 +24,7 @@ int main() {
                  }},
             }}},
   }};
-  auto res = libnbt::write<std::endian::little>(node, "123");
+  auto res = libnbt::write<libnbt::bedrock_endian>(node, "123");
   auto nbt = fopen("test.nbt", "wb");
   for (auto b : res) {
     fputc(b, nbt);
@@ -36,9 +39,9 @@ int main() {
   }
   auto begin = buffer.data();
   auto result =
-      libnbt::read<std::endian::little,
+      libnbt::read<libnbt::bedrock_endian,
                    libnbt::nbt_node<std::map, std::vector, std::string>>(
           begin, begin + buffer.size());
-  libnbt::print(result);
+  std::cout << libnbt::to_string(result);
 }
 ```
