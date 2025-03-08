@@ -524,7 +524,8 @@ write(const Nbt &nbt, const typename Nbt::string_t &name = "") {
   return details::write_type<Endian>(nbt, true, name);
 }
 namespace details {
-void checked_copy_n(auto iter, std::size_t n, auto out, const auto &end) {
+constexpr void checked_copy_n(auto iter, std::size_t n, auto out,
+                              const auto &end) {
   for (std::size_t i = 0; i < n; i++) {
     if (iter == end) {
       THROW(std::out_of_range("Out of range,input maybe invalid"));
