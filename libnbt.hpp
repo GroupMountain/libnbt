@@ -395,6 +395,7 @@ constexpr Result write_float(std::floating_point auto number) {
   auto bytes = std::bit_cast<std::array<unsigned char, sizeof(number)>>(number);
   Result res(sizeof(number));
   std::copy(bytes.begin(), bytes.end(), res.begin());
+  swap_if_need<Endian, Result>(res);
   return res;
 }
 template <template <typename> typename Array>
