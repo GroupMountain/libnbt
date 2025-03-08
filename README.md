@@ -1,4 +1,4 @@
-# libbnt
+# libnbt
 ## usage
 download ```libnbt.hpp``` add it to include path.
 ## example
