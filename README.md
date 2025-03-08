@@ -1,5 +1,8 @@
+# libbnt
+## usage
+download ```libnbt.hpp``` add it to include path.
+## example
 ```cpp
-#define _CRT_SECURE_NO_WARNINGS
 #include "libnbt.hpp"
 #include <iostream>
 #include <map>
