@@ -478,6 +478,10 @@ constexpr Nbt::template array_t<unsigned char> write_no_type(const Nbt &nbt) {
                   res);
   }
   case nbt_type::list: {
+    if (nbt.template as<typename Nbt::list_t>().empty())
+      return concat(
+          write_type<Nbt::template array_t>(nbt_type::end),
+          write_integer<Endian, Result>(static_cast<std::int32_t>(0)));
     auto res = concat(write_type<Nbt::template array_t>(
                           nbt.template as<typename Nbt::list_t>()[0].type),
                       write_integer<Endian, Result>(static_cast<std::int32_t>(
@@ -520,40 +524,52 @@ write(const Nbt &nbt, const typename Nbt::string_t &name = "") {
   return details::write_type<Endian>(nbt, true, name);
 }
 namespace details {
+void checked_copy_n(auto iter, std::size_t n, auto out, const auto &end) {
+  for (std::size_t i = 0; i < n; i++) {
+    if (iter == end) {
+      THROW(std::out_of_range("Out of range,input maybe invalid"));
+    }
+    (*out) = *iter;
+    iter++;
+    out++;
+  }
+}
 template <std::endian Endian, std::integral Integral, typename Iter>
-Integral read_integer(Iter &begin) {
+Integral read_integer(Iter &begin, const Iter &end) {
   std::array<unsigned char, sizeof(Integral)> integer;
-  std::copy_n(begin, sizeof(Integral), integer.begin());
+  // std::copy_n(begin, sizeof(Integral), integer.begin());
+  checked_copy_n(begin, sizeof(Integral), integer.begin(), end);
   begin += sizeof(Integral);
   swap_if_need<Endian>(integer);
   return std::bit_cast<Integral>(integer);
 }
 template <std::endian Endian, std::floating_point Floating, typename Iter>
-Floating read_float(Iter &begin) {
+Floating read_float(Iter &begin, const Iter &end) {
   std::array<unsigned char, sizeof(Floating)> floating;
-  std::copy_n(begin, sizeof(Floating), floating.begin());
+  // std::copy_n(begin, sizeof(Floating), floating.begin());
+  checked_copy_n(begin, sizeof(Floating), floating.begin(), end);
   begin += sizeof(Floating);
   return std::bit_cast<Floating>(floating);
 }
 template <std::endian Endian, typename Result, typename Iter>
-Result read_array(Iter &begin) {
-  auto size = read_integer<Endian, std::int32_t>(begin);
+Result read_array(Iter &begin, const Iter &end) {
+  auto size = read_integer<Endian, std::int32_t>(begin, end);
   Result res(size);
   for (auto &element : res) {
-    element = read_integer<Endian, typename Result::value_type>(begin);
+    element = read_integer<Endian, typename Result::value_type>(begin, end);
   }
   return res;
 }
-template <typename Iter> nbt_type read_type(Iter &begin) {
+template <typename Iter> nbt_type read_type(Iter &begin, const Iter &end) {
   return std::bit_cast<nbt_type>(
-      read_integer<std::endian::native, std::int8_t>(begin));
+      read_integer<std::endian::native, std::int8_t>(begin, end));
 }
 template <std::endian Endian, typename Nbt, typename Iter>
 Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type,
                  bool isRoot = false);
 template <std::endian Endian, typename Nbt, typename Iter>
 Nbt read_type(Iter &begin, const Iter &end, bool isRoot = false) {
-  return read_no_type<Endian, Nbt>(begin, end, read_type(begin), isRoot);
+  return read_no_type<Endian, Nbt>(begin, end, read_type(begin, end), isRoot);
 }
 template <std::endian Endian, typename Nbt, typename Iter>
 Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
@@ -561,28 +577,29 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
   case nbt_type::end:
     return {};
   case nbt_type::int8:
-    return {read_integer<Endian, std::int8_t>(begin)};
+    return {read_integer<Endian, std::int8_t>(begin, end)};
   case nbt_type::int16:
-    return {read_integer<Endian, std::int16_t>(begin)};
+    return {read_integer<Endian, std::int16_t>(begin, end)};
   case nbt_type::int32:
-    return {read_integer<Endian, std::int32_t>(begin)};
+    return {read_integer<Endian, std::int32_t>(begin, end)};
   case nbt_type::int64:
-    return {read_integer<Endian, std::int64_t>(begin)};
+    return {read_integer<Endian, std::int64_t>(begin, end)};
   case nbt_type::float32:
-    return {read_float<Endian, float>(begin)};
+    return {read_float<Endian, float>(begin, end)};
   case nbt_type::float64:
-    return {read_float<Endian, double>(begin)};
+    return {read_float<Endian, double>(begin, end)};
   case nbt_type::int8list:
-    return {read_array<Endian, typename Nbt::int8list_t>(begin)};
+    return {read_array<Endian, typename Nbt::int8list_t>(begin, end)};
   case nbt_type::string: {
-    typename Nbt::string_t string(read_integer<Endian, std::int16_t>(begin), 0);
+    typename Nbt::string_t string(
+        read_integer<Endian, std::int16_t>(begin, end), 0);
     for (auto &c : string)
-      c = read_integer<Endian, typename Nbt::string_t::value_type>(begin);
+      c = read_integer<Endian, typename Nbt::string_t::value_type>(begin, end);
     return string;
   }
   case nbt_type::list: {
-    auto type = read_type(begin);
-    auto size = read_integer<Endian, std::int32_t>(begin);
+    auto type = read_type(begin, end);
+    auto size = read_integer<Endian, std::int32_t>(begin, end);
     if (type != nbt_type::end) {
       typename Nbt::list_t list(size);
       for (auto &element : list) {
@@ -597,7 +614,7 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
     if (isRoot)
       read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
     while (begin < end && *begin) {
-      auto type = read_type(begin);
+      auto type = read_type(begin, end);
       auto string = read_no_type<Endian, Nbt>(begin, end, nbt_type::string);
       compound.insert({string.template as<typename Nbt::string_t>(),
                        read_no_type<Endian, Nbt>(begin, end, type)});
@@ -606,9 +623,9 @@ Nbt read_no_type(Iter &begin, const Iter &end, nbt_type type, bool isRoot) {
     return compound;
   }
   case nbt_type::int32list:
-    return {read_array<Endian, typename Nbt::int32list_t>(begin)};
+    return {read_array<Endian, typename Nbt::int32list_t>(begin, end)};
   case nbt_type::int64list:
-    return {read_array<Endian, typename Nbt::int64list_t>(begin)};
+    return {read_array<Endian, typename Nbt::int64list_t>(begin, end)};
   default:
     UNREACHABLE();
   }
