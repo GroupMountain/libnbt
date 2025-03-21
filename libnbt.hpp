@@ -165,6 +165,7 @@ struct nbt_any {
                    Str, typed_arr<any_wapper>, Map<Str, any_wapper>,
                    typed_arr<i32>, typed_arr<i64>>;
   template <typename T> struct typed_arr : Arr<any_wapper> {
+    constexpr typed_arr() = default;
     constexpr typed_arr(std::initializer_list<T> data) {
       this->resize(data.size());
       for (std::size_t index = 0; auto i : data)
@@ -322,6 +323,98 @@ template <typename T> struct binary_nbt_writer {
     output.template write<char>(static_cast<char>(nbt_type::map));
     write_no_type(N{name});
     write_no_type(nbt);
+  }
+};
+
+template <typename T> struct binary_nbt_reader {
+  T &input;
+  template <typename N> N read_no_type(nbt_type type) {
+    switch (type) {
+    case nbt_type::end:
+      return {};
+    case nbt_type::i8:
+      return {input.template read<i8>()};
+    case nbt_type::i16:
+      return {input.template read<i16>()};
+    case nbt_type::i32:
+      return {input.template read<i32>()};
+    case nbt_type::i64:
+      return {input.template read<i64>()};
+    case nbt_type::f32:
+      return {input.template read<f32>()};
+    case nbt_type::f64:
+      return {input.template read<f64>()};
+    case nbt_type::i8arr: {
+      auto size = input.template read<i32>();
+      typename N::i8arr arr;
+      arr.resize(size);
+      for (std::size_t i = 0; i < size; i++) {
+        arr._access(i) = input.template read<i8>();
+      }
+      return {arr};
+    }
+    case nbt_type::i32arr: {
+      auto size = input.template read<i32>();
+      typename N::i32arr arr;
+      arr.resize(size);
+      for (std::size_t i = 0; i < size; i++) {
+        arr._access(i) = input.template read<i32>();
+      }
+      return {arr};
+    }
+    case nbt_type::i64arr: {
+      auto size = input.template read<i32>();
+      typename N::i64arr arr;
+      arr.resize(size);
+      for (std::size_t i = 0; i < size; i++) {
+        arr._access(i) = input.template read<i64>();
+      }
+      return {arr};
+    }
+    case nbt_type::arr: {
+      auto type = static_cast<nbt_type>(input.template read<char>());
+      auto size = input.template read<i32>();
+      typename N::arr arr;
+      if (type != nbt_type::end) {
+        arr.resize(size);
+        for (std::size_t i = 0; i < size; i++) {
+          arr[i] = read_no_type<N>(type);
+        }
+      }
+      return {arr};
+    }
+    case nbt_type::map: {
+      auto type = static_cast<nbt_type>(input.template read<char>());
+      typename N::map map;
+      while (type != nbt_type::end) {
+        auto size = input.template read<i16>();
+        typename N::str str;
+        str.resize(size);
+        for (std::size_t i = 0; i < size; i++) {
+          str[i] = input.template read<char>();
+        }
+        N e = read_no_type<N>(type);
+        map[str] = e;
+        type = static_cast<nbt_type>(input.template read<char>());
+      }
+      return {map};
+    }
+    case nbt_type::str: {
+      auto size = input.template read<i16>();
+      typename N::str str;
+      str.resize(size);
+      for (std::size_t i = 0; i < size; i++) {
+        str[i] = input.template read<char>();
+      }
+      return {str};
+    }
+    }
+  }
+  template <typename N> std::pair<N, typename N::str> read() {
+    auto type = static_cast<nbt_type>(input.template read<char>());
+    typename N::str name =
+        read_no_type<N>(nbt_type::str).template as<typename N::str>();
+    return {read_no_type<N>(type), name};
   }
 };
 
