@@ -264,37 +264,58 @@ struct nbt_any {
                    typename arr::const_iterator>;
   template <typename U> struct iterator_holder {
     U iter;
-    constexpr U &operator++() {
+    constexpr auto &operator++() {
       std::visit(overloaded{[](auto &iter) { ++iter; }}, iter);
-      return iter;
+      return *this;
     }
-    constexpr U &operator--() {
+    constexpr auto &operator--() {
       std::visit(overloaded{[](auto &iter) { --iter; }}, iter);
-      return iter;
+      return *this;
     }
-    constexpr U operator++(int) {
-      return std::visit<U>(overloaded{[](auto &iter) -> U { return {iter++}; }},
-                           iter);
+    constexpr auto operator++(int) {
+      auto old = *this;
+      std::visit(overloaded{[](auto &iter) { ++iter; }}, iter);
+      return old;
     }
-    constexpr U operator--(int) {
-      return std::visit<U>(overloaded{[](auto &iter) -> U { return {iter--}; }},
-                           iter);
+    constexpr auto operator--(int) {
+      auto old = *this;
+      std::visit(overloaded{[](auto &iter) { --iter; }}, iter);
+      return old;
     }
     constexpr bool operator==(const iterator_holder &other) const {
       return std::visit<bool>(
-          overloaded{[&](auto &a) -> bool {
-            return std::visit<bool>(
-                overloaded{[&](auto &b) -> bool {
-                  if constexpr (std::same_as<decltype(a), decltype(b)>) {
-                    return a == b;
-                  }
-                  return false;
-                }},
-                iter);
-          }},
-          other.iter);
+          [](auto &a, auto &b) {
+            if constexpr (std::same_as<decltype(a), decltype(b)>)
+              return a == b;
+            else
+              return false;
+          },
+          iter, other.iter);
     }
-  };
+    struct result_t {
+      std::variant<typename map::value_type *, typename str::value_type *,
+                   typename arr::value_type *>
+          data;
+      template <typename T> auto as() { return *std::get<T *>(data); }
+      template <typename T> auto as() const { return *std::get<T *>(data); }
+      template <typename T> auto as_if() {
+        auto r = std::get_if<T *>(&data);
+        return r ? *r : nullptr;
+      }
+      template <typename T> auto as_if() const {
+        auto r = std::get_if<T *>(&data);
+        return r ? *r : nullptr;
+      }
+    };
+    constexpr auto operator*() {
+      return std::visit<result_t>(
+          [&](auto &i) -> result_t { return result_t{{&*i}}; }, iter);
+    }
+    constexpr const auto operator*() const {
+      return std::visit<const result_t>(
+          [&](auto &i) -> const result_t { return result_t{{&*i}}; }, iter);
+    }
+  }; // namespace libnbt
   using iterator = iterator_holder<iterator_type>;
   using const_iterator = iterator_holder<const_iterator_type>;
   iterator begin() {
