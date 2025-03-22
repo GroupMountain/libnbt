@@ -15,6 +15,14 @@
 #define UNREACHABLE() __builtin_unreachable()
 #endif
 namespace libnbt {
+struct invalid_type : std::runtime_error {
+  invalid_type(const std::string &what)
+      : std::runtime_error("invalid type:" + what) {}
+};
+struct invalid_data : std::runtime_error {
+  invalid_data(const std::string &what)
+      : std::runtime_error("invalid data:" + what) {}
+};
 template <typename T>
 concept input_buffer_like = requires(const T &a) {
   { a.size() } -> std::same_as<typename T::size_type>;
@@ -27,6 +35,9 @@ template <input_buffer_like T, std::endian E> struct input<T, E> {
   template <typename U> struct reader;
   template <> struct reader<char> {
     static constexpr char read(const T &data, T::size_type &index) {
+      if (index >= data.size()) {
+        throw invalid_data("out of range.");
+      }
       return data[index++];
     }
   };
@@ -124,10 +135,6 @@ enum class nbt_type : std::int8_t {
   i64arr
 };
 
-struct invalid_type : std::runtime_error {
-  invalid_type(const std::string &what) : std::runtime_error(what) {}
-};
-
 template <typename Str, template <typename> typename Arr,
           template <typename, typename> typename Map>
 struct nbt_any {
@@ -169,25 +176,25 @@ struct nbt_any {
     constexpr typed_arr(std::initializer_list<T> data) {
       this->resize(data.size());
       for (std::size_t index = 0; auto i : data)
-        _access(index++) = i;
+        access(index++) = i;
     }
-    any_wapper &_access(std::size_t index) {
+    any_wapper &access(std::size_t index) {
       return this->Arr<any_wapper>::operator[](index);
     }
-    const any_wapper &_access(std::size_t index) const {
+    const any_wapper &access(std::size_t index) const {
       return this->Arr<any_wapper>::operator[](index);
     }
     T &operator[](std::size_t index) {
       if constexpr (!std::same_as<T, any_wapper>) {
-        return _access(index).data->template as<T>();
+        return access(index).data->template as<T>();
       } else
-        return _access(index);
+        return access(index);
     }
     const T &operator[](std::size_t index) const {
       if constexpr (!std::same_as<T, any_wapper>)
-        return _access(index).data->template as<T>();
+        return access(index).data->template as<T>();
       else
-        return _access(index);
+        return access(index);
     }
   };
 
@@ -215,7 +222,7 @@ struct nbt_any {
   constexpr nbt_any &operator[](const std::string &index) {
     return visit<nbt_any &>(overloaded{
         [](auto &&) -> nbt_any & {
-          throw invalid_type("invalid type.");
+          throw invalid_type("type is not a map.");
           UNREACHABLE();
         },
         [&](Map<Str, any_wapper> &val) -> nbt_any & {
@@ -226,20 +233,20 @@ struct nbt_any {
   constexpr nbt_any &operator[](std::size_t index) {
     return visit<nbt_any &>(overloaded{
         [](auto &&) -> nbt_any & {
-          throw invalid_type("invalid type.");
+          throw invalid_type("type is not an array.");
           UNREACHABLE();
         },
         [&](typed_arr<i8> &val) -> nbt_any & {
-          return *val._access(index).data;
+          return *val.access(index).data;
         },
         [&](typed_arr<i32> &val) -> nbt_any & {
-          return *val._access(index).data;
+          return *val.access(index).data;
         },
         [&](typed_arr<i64> &val) -> nbt_any & {
-          return *val._access(index).data;
+          return *val.access(index).data;
         },
         [&](typed_arr<any_wapper> &val) -> nbt_any & {
-          return *val._access(index).data;
+          return *val.access(index).data;
         },
     });
   }
@@ -249,6 +256,79 @@ struct nbt_any {
   using i64arr = typed_arr<i64>;
   using arr = typed_arr<any_wapper>;
   using map = Map<Str, any_wapper>;
+  using iterator_type =
+      std::variant<typename map::iterator, typename str::iterator,
+                   typename arr::iterator>;
+  using const_iterator_type =
+      std::variant<typename map::const_iterator, typename str::const_iterator,
+                   typename arr::const_iterator>;
+  template <typename U> struct iterator_holder {
+    U iter;
+    constexpr U &operator++() {
+      std::visit(overloaded{[](auto &iter) { ++iter; }}, iter);
+      return iter;
+    }
+    constexpr U &operator--() {
+      std::visit(overloaded{[](auto &iter) { --iter; }}, iter);
+      return iter;
+    }
+    constexpr U operator++(int) {
+      return std::visit<U>(overloaded{[](auto &iter) -> U { return {iter++}; }},
+                           iter);
+    }
+    constexpr U operator--(int) {
+      return std::visit<U>(overloaded{[](auto &iter) -> U { return {iter--}; }},
+                           iter);
+    }
+    constexpr bool operator==(const iterator_holder &other) const {
+      return std::visit<bool>(
+          overloaded{[&](auto &a) -> bool {
+            return std::visit<bool>(
+                overloaded{[&](auto &b) -> bool {
+                  if constexpr (std::same_as<decltype(a), decltype(b)>) {
+                    return a == b;
+                  }
+                  return false;
+                }},
+                iter);
+          }},
+          other.iter);
+    }
+  };
+  using iterator = iterator_holder<iterator_type>;
+  using const_iterator = iterator_holder<const_iterator_type>;
+  iterator begin() {
+    return visit<iterator>(overloaded{[](auto &data) -> iterator {
+      if constexpr (requires() { data.begin(); })
+        return {data.begin()};
+      throw invalid_type("type is not iterable.");
+      UNREACHABLE();
+    }});
+  }
+  const_iterator begin() const {
+    return visit<const_iterator>(overloaded{[](auto &data) -> const_iterator {
+      if constexpr (requires() { data.begin(); })
+        return {data.begin()};
+      throw invalid_type("type is not iterable.");
+      UNREACHABLE();
+    }});
+  }
+  iterator end() {
+    return visit<iterator>(overloaded{[](auto &data) -> iterator {
+      if constexpr (requires() { data.end(); })
+        return {data.end()};
+      throw invalid_type("type is not iterable.");
+      UNREACHABLE();
+    }});
+  }
+  const_iterator end() const {
+    return visit<const_iterator>(overloaded{[](auto &data) -> const_iterator {
+      if constexpr (requires() { data.end(); })
+        return {data.end()};
+      throw invalid_type("type is not iterable.");
+      UNREACHABLE();
+    }});
+  }
 };
 using nbt = libnbt::nbt_any<std::string, std::vector, std::map>;
 using i8 = std::int8_t;
@@ -349,7 +429,7 @@ template <typename T> struct binary_nbt_reader {
       typename N::i8arr arr;
       arr.resize(size);
       for (std::size_t i = 0; i < size; i++) {
-        arr._access(i) = input.template read<i8>();
+        arr.access(i) = input.template read<i8>();
       }
       return {arr};
     }
@@ -358,7 +438,7 @@ template <typename T> struct binary_nbt_reader {
       typename N::i32arr arr;
       arr.resize(size);
       for (std::size_t i = 0; i < size; i++) {
-        arr._access(i) = input.template read<i32>();
+        arr.access(i) = input.template read<i32>();
       }
       return {arr};
     }
@@ -367,7 +447,7 @@ template <typename T> struct binary_nbt_reader {
       typename N::i64arr arr;
       arr.resize(size);
       for (std::size_t i = 0; i < size; i++) {
-        arr._access(i) = input.template read<i64>();
+        arr.access(i) = input.template read<i64>();
       }
       return {arr};
     }
@@ -417,5 +497,4 @@ template <typename T> struct binary_nbt_reader {
     return {read_no_type<N>(type), name};
   }
 };
-
 } // namespace libnbt
