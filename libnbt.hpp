@@ -307,13 +307,17 @@ struct nbt_any {
         return r ? *r : nullptr;
       }
     };
-    constexpr auto operator*() {
-      return std::visit<result_t>(
+    result_t res0;
+    constexpr auto &operator*() {
+      res0 = std::visit<result_t>(
           [&](auto &i) -> result_t { return result_t{{&*i}}; }, iter);
+      return res0;
     }
-    constexpr const auto operator*() const {
-      return std::visit<const result_t>(
+    const result_t res1;
+    constexpr const auto &operator*() const {
+      res1 = std::visit<const result_t>(
           [&](auto &i) -> const result_t { return result_t{{&*i}}; }, iter);
+      return res1;
     }
   }; // namespace libnbt
   using iterator = iterator_holder<iterator_type>;
