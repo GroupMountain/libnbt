@@ -1,125 +1,15 @@
-#pragma once
 #include <algorithm>
 #include <bit>
 #include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
-#include <map>
-#include <memory>
-#include <variant>
-#include <vector>
+#include <cstring>
+#include <stdexcept>
+#include <utility>
 
-#if defined(_MSC_VER) && !defined(__clang__)
-#define UNREACHABLE() __assume(false)
-#else
-#define UNREACHABLE() __builtin_unreachable()
-#endif
 namespace libnbt {
-struct invalid_type : std::runtime_error {
-  invalid_type(const std::string &what)
-      : std::runtime_error("invalid type:" + what) {}
-};
-struct invalid_data : std::runtime_error {
-  invalid_data(const std::string &what)
-      : std::runtime_error("invalid data:" + what) {}
-};
-template <typename T>
-concept input_buffer_like = requires(const T &a) {
-  { a.size() } -> std::same_as<typename T::size_type>;
-  { a[1] } -> std::same_as<const typename T::value_type &>;
-};
-template <typename T, std::endian E = std::endian::little> struct input;
-template <input_buffer_like T, std::endian E> struct input<T, E> {
-  const T &data;
-  T::size_type index = 0;
-  template <typename U> struct reader;
-  template <> struct reader<char> {
-    static constexpr char read(const T &data, T::size_type &index) {
-      if (index >= data.size()) {
-        throw invalid_data("out of range.");
-      }
-      return data[index++];
-    }
-  };
-  template <std::integral U> struct reader<U> {
-    static constexpr U read(const T &data, T::size_type &index) {
-      U val{0};
-      char *ptr = reinterpret_cast<char *>(std::addressof(val));
-      for (std::size_t i = 0; i < sizeof(U); i++) {
-        *(ptr + i) = reader<char>::read(data, index);
-      }
-      if (E != std::endian::native)
-        std::reverse(reinterpret_cast<char *>(std::addressof(val)),
-                     reinterpret_cast<char *>(std::addressof(val)) + sizeof(U));
-      return val;
-    }
-  };
-  template <std::floating_point U> struct reader<U> {
-    static constexpr U read(const T &data, T::size_type &index) {
-      U val{0};
-      char *ptr = reinterpret_cast<char *>(std::addressof(val));
-      for (std::size_t i = 0; i < sizeof(U); i++) {
-        *(ptr + i) = reader<char>::read(data, index);
-      }
-      if (E != std::endian::native)
-        std::reverse(ptr, ptr + sizeof(U));
-      return val;
-    }
-  };
-  template <typename U> constexpr U read() {
-    return reader<U>::read(data, index);
-  }
-  constexpr void reset() { index = 0; }
-};
-template <typename T> input(const T &data) -> input<T>;
-
-template <typename T>
-concept output_buffer_like = input_buffer_like<T> && requires(T &a) {
-  { a.resize(1) };
-  { a[1] } -> std::same_as<typename T::value_type &>;
-};
-template <typename T, std::endian E = std::endian::little> struct output;
-template <output_buffer_like T, std::endian E> struct output<T, E> {
-  T &data;
-  T::size_type index;
-  template <typename U> struct writer;
-  template <> struct writer<char> {
-    static constexpr void write(char val, T &data, T::size_type &index) {
-      if (data.size() >= index) {
-        data.resize(data.size() + 1);
-      }
-      data[index++] = val;
-    }
-  };
-  template <std::integral U> struct writer<U> {
-    static constexpr void write(U val, T &data, T::size_type &index) {
-      char *ptr = reinterpret_cast<char *>(std::addressof(val));
-      if (E != std::endian::native)
-        std::reverse(ptr, ptr + sizeof(U));
-      for (std::size_t i = 0; i < sizeof(U); i++) {
-        writer<char>::write(*(ptr + i), data, index);
-      }
-    }
-  };
-  template <std::floating_point U> struct writer<U> {
-    static constexpr void write(U val, T &data, T::size_type &index) {
-      char *ptr = reinterpret_cast<char *>(std::addressof(val));
-      if (E != std::endian::native)
-        std::reverse(ptr, ptr + sizeof(U));
-      for (std::size_t i = 0; i < sizeof(U); i++) {
-        writer<char>::write(*(ptr + i), data, index);
-      }
-    }
-  };
-  template <typename U> constexpr void write(U val) {
-    return writer<std::remove_cvref_t<U>>::write(val, data, index);
-  }
-  constexpr void reset() { index = 0; }
-  constexpr void to_fit() { data.resize(index); }
-};
-template <typename T> output(T &data) -> output<T>;
-
-enum class nbt_type : std::int8_t {
+enum class nbt_type : ::std::int8_t {
   end,
   i8,
   i16,
@@ -134,392 +24,634 @@ enum class nbt_type : std::int8_t {
   i32arr,
   i64arr
 };
-
-template <typename Str, template <typename> typename Arr,
+template <typename Str, template <typename> typename Vec,
           template <typename, typename> typename Map>
-struct nbt_any {
-  using i8 = std::int8_t;
-  using i16 = std::int16_t;
-  using i32 = std::int32_t;
-  using i64 = std::int64_t;
-  using f32 = float;
-  using f64 = double;
-  struct any_wapper;
-  template <typename T> struct typed_arr;
-  struct any_wapper {
-    nbt_any *data;
-    template <typename U> U &as() { return data->as<U>(); }
-    template <typename U> U &as() const { return data->as<U>(); }
-    template <typename U> U *as_if() { return data->as_if<U>(); }
-    template <typename U> U *as_if() const { return data->as_if<U>(); }
-    constexpr any_wapper() : data(nullptr) {}
-    constexpr any_wapper(const any_wapper &other)
-        : data(new nbt_any(*other.data)) {}
-    constexpr any_wapper &operator=(const any_wapper &other) {
-      data = new nbt_any(*other.data);
-      return *this;
+struct nbt_t {
+  struct ptr_holder_t {
+    nbt_t *data;
+    constexpr ptr_holder_t();
+    constexpr ptr_holder_t(const nbt_t &);
+    constexpr ptr_holder_t(nbt_t &&);
+    constexpr ptr_holder_t(const ptr_holder_t &);
+    constexpr ~ptr_holder_t();
+    constexpr nbt_t &operator*();
+    constexpr const nbt_t &operator*() const;
+    constexpr ptr_holder_t &operator=(const nbt_t &);
+    constexpr ptr_holder_t &operator=(nbt_t &&);
+    constexpr ptr_holder_t &operator=(const ptr_holder_t &);
+    template <typename T> constexpr T &as() { return data->as<T>(); }
+    template <typename T> constexpr const T &as() const {
+      return data->as<T>();
     }
-    template <typename U>
-    constexpr any_wapper(const U &other) : data(new nbt_any(other)) {}
-    template <typename U> constexpr any_wapper &operator=(const U &other) {
-      data = new nbt_any(other);
-      return *this;
+    template <typename T> constexpr T *as_if() { return data->as_if<T>(); }
+    template <typename T> constexpr const T *as_if() const {
+      return data->as_if<T>();
     }
-    constexpr ~any_wapper() { delete data; }
+    template <typename T> constexpr bool is() const { return data->is<T>(); }
   };
-  using nbt_variant =
-      std::variant<std::monostate, i8, i16, i32, i64, f32, f64, typed_arr<i8>,
-                   Str, typed_arr<any_wapper>, Map<Str, any_wapper>,
-                   typed_arr<i32>, typed_arr<i64>>;
-  template <typename T> struct typed_arr : Arr<any_wapper> {
-    constexpr typed_arr() = default;
-    constexpr typed_arr(std::initializer_list<T> data) {
-      this->resize(data.size());
-      for (std::size_t index = 0; auto i : data)
-        access(index++) = i;
-    }
-    any_wapper &access(std::size_t index) {
-      return this->Arr<any_wapper>::operator[](index);
-    }
-    const any_wapper &access(std::size_t index) const {
-      return this->Arr<any_wapper>::operator[](index);
-    }
-    T &operator[](std::size_t index) {
-      if constexpr (!std::same_as<T, any_wapper>) {
-        return access(index).data->template as<T>();
-      } else
-        return access(index);
-    }
-    const T &operator[](std::size_t index) const {
-      if constexpr (!std::same_as<T, any_wapper>)
-        return access(index).data->template as<T>();
-      else
-        return access(index);
-    }
-  };
-
-  nbt_variant data;
-  template <typename U> U &as() { return std::get<U>(data); }
-  template <typename U> U &as() const { return std::get<U>(data); }
-  template <typename U> U *as_if() { return std::get_if<U>(data); }
-  template <typename U> U *as_if() const { return std::get_if<U>(data); }
-  template <typename... Ts> struct overloaded : Ts... {
-    using Ts::operator()...;
-  };
-  template <typename Visitor> constexpr auto visit(Visitor &&vis) {
-    return std::visit(std::forward<Visitor>(vis), data);
+  using end_t = ::std::nullptr_t;
+  using i8_t = ::std::int8_t;
+  using i16_t = ::std::int16_t;
+  using i32_t = ::std::int32_t;
+  using i64_t = ::std::int64_t;
+  using f32_t = float;
+  using f64_t = double;
+  using i8arr_t = Vec<i8_t>;
+  using str_t = Str;
+  using arr_t = Vec<ptr_holder_t>;
+  using map_t = Map<str_t, ptr_holder_t>;
+  using i32arr_t = Vec<i32_t>;
+  using i64arr_t = Vec<i64_t>;
+  template <typename T> constexpr static ::libnbt::nbt_type type_to_enum() {
+    using enum ::libnbt::nbt_type;
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (requires() {                                                   \
+                  {                                                            \
+                    U##_t { ::std::declval<T>() }                              \
+                  };                                                           \
+                })                                                             \
+  return U
+    IF_CONSTEXPR(end);
+    else IF_CONSTEXPR(i8);
+    else IF_CONSTEXPR(i16);
+    else IF_CONSTEXPR(i32);
+    else IF_CONSTEXPR(i64);
+    else IF_CONSTEXPR(f32);
+    else IF_CONSTEXPR(f64);
+    else IF_CONSTEXPR(i8arr);
+    else IF_CONSTEXPR(str);
+    else IF_CONSTEXPR(arr);
+    else IF_CONSTEXPR(map);
+    else IF_CONSTEXPR(i32arr);
+    else IF_CONSTEXPR(i64arr);
+    else static_assert(false, "unknown type.");
+#pragma pop_macro("IF_CONSTEXPR")
   }
-  template <typename R, typename Visitor> constexpr R visit(Visitor &&vis) {
-    return std::visit<R>(std::forward<Visitor>(vis), data);
-  }
-  template <typename Visitor> constexpr auto visit(Visitor &&vis) const {
-    return std::visit(std::forward<Visitor>(vis), data);
-  }
-  template <typename R, typename Visitor>
-  constexpr R visit(Visitor &&vis) const {
-    return std::visit<R>(std::forward<Visitor>(vis), data);
-  }
-  constexpr nbt_any &operator[](const std::string &index) {
-    return visit<nbt_any &>(overloaded{
-        [](auto &&) -> nbt_any & {
-          throw invalid_type("type is not a map.");
-          UNREACHABLE();
-        },
-        [&](Map<Str, any_wapper> &val) -> nbt_any & {
-          return *val[index].data;
-        },
-    });
-  }
-  constexpr nbt_any &operator[](std::size_t index) {
-    return visit<nbt_any &>(overloaded{
-        [](auto &&) -> nbt_any & {
-          throw invalid_type("type is not an array.");
-          UNREACHABLE();
-        },
-        [&](typed_arr<i8> &val) -> nbt_any & {
-          return *val.access(index).data;
-        },
-        [&](typed_arr<i32> &val) -> nbt_any & {
-          return *val.access(index).data;
-        },
-        [&](typed_arr<i64> &val) -> nbt_any & {
-          return *val.access(index).data;
-        },
-        [&](typed_arr<any_wapper> &val) -> nbt_any & {
-          return *val.access(index).data;
-        },
-    });
-  }
-  using str = Str;
-  using i8arr = typed_arr<i8>;
-  using i32arr = typed_arr<i32>;
-  using i64arr = typed_arr<i64>;
-  using arr = typed_arr<any_wapper>;
-  using map = Map<Str, any_wapper>;
-  using iterator_type =
-      std::variant<typename map::iterator, typename str::iterator,
-                   typename arr::iterator>;
-  using const_iterator_type =
-      std::variant<typename map::const_iterator, typename str::const_iterator,
-                   typename arr::const_iterator>;
-  template <typename U> struct iterator_holder {
-    U iter;
-    constexpr auto &operator++() {
-      std::visit(overloaded{[](auto &iter) { ++iter; }}, iter);
-      return *this;
-    }
-    constexpr auto &operator--() {
-      std::visit(overloaded{[](auto &iter) { --iter; }}, iter);
-      return *this;
-    }
-    constexpr auto operator++(int) {
-      auto old = *this;
-      std::visit(overloaded{[](auto &iter) { ++iter; }}, iter);
-      return old;
-    }
-    constexpr auto operator--(int) {
-      auto old = *this;
-      std::visit(overloaded{[](auto &iter) { --iter; }}, iter);
-      return old;
-    }
-    constexpr bool operator==(const iterator_holder &other) const {
-      return std::visit<bool>(
-          [](auto &a, auto &b) {
-            if constexpr (std::same_as<decltype(a), decltype(b)>)
-              return a == b;
-            else
-              return false;
-          },
-          iter, other.iter);
-    }
-    struct result_t {
-      std::variant<typename map::value_type *, typename str::value_type *,
-                   typename arr::value_type *>
-          data;
-      template <typename T> auto as() { return *std::get<T *>(data); }
-      template <typename T> auto as() const { return *std::get<T *>(data); }
-      template <typename T> auto as_if() {
-        auto r = std::get_if<T *>(&data);
-        return r ? *r : nullptr;
-      }
-      template <typename T> auto as_if() const {
-        auto r = std::get_if<T *>(&data);
-        return r ? *r : nullptr;
-      }
-    };
-    result_t res0;
-    constexpr auto &operator*() {
-      res0 = std::visit<result_t>(
-          [&](auto &i) -> result_t { return result_t{{&*i}}; }, iter);
-      return res0;
-    }
-    const result_t res1;
-    constexpr const auto &operator*() const {
-      res1 = std::visit<const result_t>(
-          [&](auto &i) -> const result_t { return result_t{{&*i}}; }, iter);
-      return res1;
-    }
-  }; // namespace libnbt
-  using iterator = iterator_holder<iterator_type>;
-  using const_iterator = iterator_holder<const_iterator_type>;
-  iterator begin() {
-    return visit<iterator>(overloaded{[](auto &data) -> iterator {
-      if constexpr (requires() { data.begin(); })
-        return {data.begin()};
-      throw invalid_type("type is not iterable.");
-      UNREACHABLE();
-    }});
-  }
-  const_iterator begin() const {
-    return visit<const_iterator>(overloaded{[](auto &data) -> const_iterator {
-      if constexpr (requires() { data.begin(); })
-        return {data.begin()};
-      throw invalid_type("type is not iterable.");
-      UNREACHABLE();
-    }});
-  }
-  iterator end() {
-    return visit<iterator>(overloaded{[](auto &data) -> iterator {
-      if constexpr (requires() { data.end(); })
-        return {data.end()};
-      throw invalid_type("type is not iterable.");
-      UNREACHABLE();
-    }});
-  }
-  const_iterator end() const {
-    return visit<const_iterator>(overloaded{[](auto &data) -> const_iterator {
-      if constexpr (requires() { data.end(); })
-        return {data.end()};
-      throw invalid_type("type is not iterable.");
-      UNREACHABLE();
-    }});
-  }
-};
-using nbt = libnbt::nbt_any<std::string, std::vector, std::map>;
-using i8 = std::int8_t;
-using i16 = std::int16_t;
-using i32 = std::int32_t;
-using i64 = std::int64_t;
-using f32 = float;
-using f64 = double;
-using str = nbt::str;
-using i8arr = nbt::i8arr;
-using i32arr = nbt::i32arr;
-using i64arr = nbt::i64arr;
-using arr = nbt::arr;
-using map = nbt::map;
-template <typename T> struct binary_nbt_writer {
-  T &output;
-  template <typename N> void write_no_type(const N &nbt) {
-    nbt.visit(typename N::overloaded{
-        [this](const std::integral auto &val) { output.template write<>(val); },
-        [this](const std::floating_point auto &val) {
-          output.template write<>(val);
-        },
-        [this](const N::str &val) {
-          output.template write<i16>(static_cast<i16>(val.size()));
-          for (auto c : val) {
-            output.template write<char>(c);
-          }
-        },
-        [this](const N::i8arr &val) {
-          output.template write<i32>(static_cast<i32>(val.size()));
-          for (auto e : val) {
-            output.template write<i8>(e.template as<i8>());
-          }
-        },
-        [this](const N::i32arr &val) {
-          output.template write<i32>(static_cast<i32>(val.size()));
-          for (auto e : val) {
-            output.template write<i32>(e.template as<i32>());
-          }
-        },
-        [this](const N::i64arr &val) {
-          output.template write<i32>(static_cast<i32>(val.size()));
-          for (auto e : val) {
-            output.template write<i64>(e.template as<i64>());
-          }
-        },
-        [this](const N::arr &val) {
-          if (val.size() == 0) {
-            output.template write<char>(static_cast<char>(nbt_type::end));
-            output.template write<i32>(0);
-          } else {
-            output.template write<char>(
-                static_cast<char>(val[0].data->data.index()));
-            output.template write<i32>(static_cast<i32>(val.size()));
-            for (auto e : val) {
-              write_no_type(*e.data);
-            }
-          }
-        },
-        [this](const N::map &val) {
-          for (auto &[n, e] : val) {
-            output.template write<char>(e.data->data.index());
-            write_no_type(N{n});
-            write_no_type(*e.data);
-          }
-          output.template write<char>(static_cast<char>(nbt_type::end));
-        },
-        [this](const std::monostate &) {},
-    });
-  }
-  template <typename N> void write(const N &nbt, const N::str &name = "") {
-    output.template write<char>(static_cast<char>(nbt_type::map));
-    write_no_type(N{name});
-    write_no_type(nbt);
-  }
-};
-
-template <typename T> struct binary_nbt_reader {
-  T &input;
-  template <typename N> N read_no_type(nbt_type type) {
+  ::libnbt::nbt_type type{::libnbt::nbt_type::end};
+  union val_t {
+    end_t end;
+    i8_t i8;
+    i16_t i16;
+    i32_t i32;
+    i64_t i64;
+    f32_t f32;
+    f64_t f64;
+    i8arr_t i8arr;
+    str_t str;
+    arr_t arr;
+    map_t map;
+    i32arr_t i32arr;
+    i64arr_t i64arr;
+    constexpr ~val_t() {}
+  } val{nullptr};
+  constexpr ~nbt_t() {
+    using enum ::libnbt::nbt_type;
     switch (type) {
-    case nbt_type::end:
-      return {};
-    case nbt_type::i8:
-      return {input.template read<i8>()};
-    case nbt_type::i16:
-      return {input.template read<i16>()};
-    case nbt_type::i32:
-      return {input.template read<i32>()};
-    case nbt_type::i64:
-      return {input.template read<i64>()};
-    case nbt_type::f32:
-      return {input.template read<f32>()};
-    case nbt_type::f64:
-      return {input.template read<f64>()};
-    case nbt_type::i8arr: {
-      auto size = input.template read<i32>();
-      typename N::i8arr arr;
-      arr.resize(size);
-      for (std::size_t i = 0; i < size; i++) {
-        arr.access(i) = input.template read<i8>();
-      }
-      return {arr};
-    }
-    case nbt_type::i32arr: {
-      auto size = input.template read<i32>();
-      typename N::i32arr arr;
-      arr.resize(size);
-      for (std::size_t i = 0; i < size; i++) {
-        arr.access(i) = input.template read<i32>();
-      }
-      return {arr};
-    }
-    case nbt_type::i64arr: {
-      auto size = input.template read<i32>();
-      typename N::i64arr arr;
-      arr.resize(size);
-      for (std::size_t i = 0; i < size; i++) {
-        arr.access(i) = input.template read<i64>();
-      }
-      return {arr};
-    }
-    case nbt_type::arr: {
-      auto type = static_cast<nbt_type>(input.template read<char>());
-      auto size = input.template read<i32>();
-      typename N::arr arr;
-      if (type != nbt_type::end) {
-        arr.resize(size);
-        for (std::size_t i = 0; i < size; i++) {
-          arr[i] = read_no_type<N>(type);
-        }
-      }
-      return {arr};
-    }
-    case nbt_type::map: {
-      auto type = static_cast<nbt_type>(input.template read<char>());
-      typename N::map map;
-      while (type != nbt_type::end) {
-        auto size = input.template read<i16>();
-        typename N::str str;
-        str.resize(size);
-        for (std::size_t i = 0; i < size; i++) {
-          str[i] = input.template read<char>();
-        }
-        N e = read_no_type<N>(type);
-        map[str] = e;
-        type = static_cast<nbt_type>(input.template read<char>());
-      }
-      return {map};
-    }
-    case nbt_type::str: {
-      auto size = input.template read<i16>();
-      typename N::str str;
-      str.resize(size);
-      for (std::size_t i = 0; i < size; i++) {
-        str[i] = input.template read<char>();
-      }
-      return {str};
-    }
+    case i8arr:
+      val.i8arr.~i8arr_t();
+      break;
+    case str:
+      val.str.~str_t();
+      break;
+    case arr:
+      val.arr.~arr_t();
+      break;
+    case map:
+      val.map.~map_t();
+      break;
+    case i32arr:
+      val.i32arr.~i32arr_t();
+      break;
+    case i64arr:
+      val.i64arr.~i64arr_t();
+      break;
+    default:
+      break;
     }
   }
-  template <typename N> std::pair<N, typename N::str> read() {
-    auto type = static_cast<nbt_type>(input.template read<char>());
-    typename N::str name =
-        read_no_type<N>(nbt_type::str).template as<typename N::str>();
-    return {read_no_type<N>(type), name};
+  template <typename T> constexpr nbt_t(T &&val) {
+    if constexpr (std::same_as<nbt_t, std::remove_cvref_t<T>>) {
+      type = val.type;
+#pragma push_macro("CASE")
+#undef CASE
+#define CASE(U)                                                                \
+  case U:                                                                      \
+    new (&this->val) U##_t{std::forward<decltype(val.val.U)>(val.val.U)};      \
+    break
+      using enum ::libnbt::nbt_type;
+      switch (type) {
+        CASE(end);
+        CASE(i8);
+        CASE(i16);
+        CASE(i32);
+        CASE(i64);
+        CASE(f32);
+        CASE(f64);
+        CASE(i8arr);
+        CASE(str);
+        CASE(arr);
+        CASE(map);
+        CASE(i32arr);
+        CASE(i64arr);
+      }
+#pragma pop_macro("CASE")
+    } else {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (requires() {                                                   \
+                  {                                                            \
+                    U##_t { ::std::declval<T>() }                              \
+                  };                                                           \
+                })                                                             \
+  new (&this->val) U##_t{std::forward<U##_t>(val)}
+      type = type_to_enum<std::remove_cvref_t<T>>();
+      IF_CONSTEXPR(end);
+      else IF_CONSTEXPR(i8);
+      else IF_CONSTEXPR(i16);
+      else IF_CONSTEXPR(i32);
+      else IF_CONSTEXPR(i64);
+      else IF_CONSTEXPR(f32);
+      else IF_CONSTEXPR(f64);
+      else IF_CONSTEXPR(i8arr);
+      else IF_CONSTEXPR(str);
+      else IF_CONSTEXPR(arr);
+      else IF_CONSTEXPR(map);
+      else IF_CONSTEXPR(i32arr);
+      else IF_CONSTEXPR(i64arr);
+      else static_assert(false, "unknown type.");
+#pragma pop_macro("IF_CONSTEXPR")
+    }
+  }
+  constexpr nbt_t() : type(nbt_type::end), val(nullptr) {}
+  template <typename T> constexpr nbt_t &operator=(T &&val) {
+    if constexpr (std::same_as<nbt_t, std::remove_cvref_t<T>>) {
+      type = val.type;
+#pragma push_macro("CASE")
+#undef CASE
+#define CASE(U)                                                                \
+  case U:                                                                      \
+    new (&this->val) U##_t{std::forward<decltype(val.val.U)>(val.val.U)};      \
+    break
+      using enum ::libnbt::nbt_type;
+      switch (type) {
+        CASE(end);
+        CASE(i8);
+        CASE(i16);
+        CASE(i32);
+        CASE(i64);
+        CASE(f32);
+        CASE(f64);
+        CASE(i8arr);
+        CASE(str);
+        CASE(arr);
+        CASE(map);
+        CASE(i32arr);
+        CASE(i64arr);
+      }
+#pragma pop_macro("CASE")
+    } else {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (requires() {                                                   \
+                  {                                                            \
+                    U##_t { ::std::declval<T>() }                              \
+                  };                                                           \
+                })                                                             \
+  new (&this->val) U##_t{std::forward<U##_t>(val)}
+      type = type_to_enum<std::remove_cvref_t<T>>();
+      IF_CONSTEXPR(end);
+      else IF_CONSTEXPR(i8);
+      else IF_CONSTEXPR(i16);
+      else IF_CONSTEXPR(i32);
+      else IF_CONSTEXPR(i64);
+      else IF_CONSTEXPR(f32);
+      else IF_CONSTEXPR(f64);
+      else IF_CONSTEXPR(i8arr);
+      else IF_CONSTEXPR(str);
+      else IF_CONSTEXPR(arr);
+      else IF_CONSTEXPR(map);
+      else IF_CONSTEXPR(i32arr);
+      else IF_CONSTEXPR(i64arr);
+      else static_assert(false, "unknown type.");
+#pragma pop_macro("IF_CONSTEXPR")
+    }
+    return *this;
+  }
+  template <typename T> constexpr T &as() {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (std::same_as<T, U##_t>) {                                      \
+    if (type != type_to_enum<T>()) {                                           \
+      throw std::runtime_error("type mismatch.");                              \
+    }                                                                          \
+    return val.U;                                                              \
+  }
+    // clang-format off
+    IF_CONSTEXPR(end)
+    else IF_CONSTEXPR(i8)
+    else IF_CONSTEXPR(i16)
+    else IF_CONSTEXPR(i32)
+    else IF_CONSTEXPR(i64)
+    else IF_CONSTEXPR(f32)
+    else IF_CONSTEXPR(f64)
+    else IF_CONSTEXPR(i8arr)
+    else IF_CONSTEXPR(str)
+    else IF_CONSTEXPR(arr)
+    else IF_CONSTEXPR(map)
+    else IF_CONSTEXPR(i32arr)
+    else IF_CONSTEXPR(i64arr)
+    else static_assert(false, "unknown type.");
+    // clang-format on
+#pragma pop_macro("IF_CONSTEXPR")
+  }
+  template <typename T> constexpr const T &as() const {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (std::same_as<T, U##_t>) {                                      \
+    if (type != type_to_enum<T>()) {                                           \
+      throw std::runtime_error("type mismatch.");                              \
+    }                                                                          \
+    return val.U;                                                              \
+  }
+    // clang-format off
+        IF_CONSTEXPR(end)
+        else IF_CONSTEXPR(i8)
+        else IF_CONSTEXPR(i16)
+        else IF_CONSTEXPR(i32)
+        else IF_CONSTEXPR(i64)
+        else IF_CONSTEXPR(f32)
+        else IF_CONSTEXPR(f64)
+        else IF_CONSTEXPR(i8arr)
+        else IF_CONSTEXPR(str)
+        else IF_CONSTEXPR(arr)
+        else IF_CONSTEXPR(map)
+        else IF_CONSTEXPR(i32arr)
+        else IF_CONSTEXPR(i64arr)
+        else static_assert(false, "unknown type.");
+    // clang-format on
+#pragma pop_macro("IF_CONSTEXPR")
+  }
+  template <typename T> constexpr T *as_if() {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (std::same_as<T, U##_t>) {                                      \
+    if (type != type_to_enum<T>()) {                                           \
+      return nullptr;                                                          \
+    }                                                                          \
+    return &val.U;                                                             \
+  }
+    // clang-format off
+        IF_CONSTEXPR(end)
+        else IF_CONSTEXPR(i8)
+        else IF_CONSTEXPR(i16)
+        else IF_CONSTEXPR(i32)
+        else IF_CONSTEXPR(i64)
+        else IF_CONSTEXPR(f32)
+        else IF_CONSTEXPR(f64)
+        else IF_CONSTEXPR(i8arr)
+        else IF_CONSTEXPR(str)
+        else IF_CONSTEXPR(arr)
+        else IF_CONSTEXPR(map)
+        else IF_CONSTEXPR(i32arr)
+        else IF_CONSTEXPR(i64arr)
+        else static_assert(false, "unknown type.");
+    // clang-format on
+#pragma pop_macro("IF_CONSTEXPR")
+  }
+  template <typename T> constexpr const T *as_if() const {
+#pragma push_macro("IF_CONSTEXPR")
+#undef IF_CONSTEXPR
+#define IF_CONSTEXPR(U)                                                        \
+  if constexpr (std::same_as<T, U##_t>) {                                      \
+    if (type != type_to_enum<T>()) {                                           \
+      return nullptr;                                                          \
+    }                                                                          \
+    return &val.U;                                                             \
+  }
+    // clang-format off
+            IF_CONSTEXPR(end)
+            else IF_CONSTEXPR(i8)
+            else IF_CONSTEXPR(i16)
+            else IF_CONSTEXPR(i32)
+            else IF_CONSTEXPR(i64)
+            else IF_CONSTEXPR(f32)
+            else IF_CONSTEXPR(f64)
+            else IF_CONSTEXPR(i8arr)
+            else IF_CONSTEXPR(str)
+            else IF_CONSTEXPR(arr)
+            else IF_CONSTEXPR(map)
+            else IF_CONSTEXPR(i32arr)
+            else IF_CONSTEXPR(i64arr)
+            else static_assert(false, "unknown type.");
+    // clang-format on
+#pragma pop_macro("IF_CONSTEXPR")
+  }
+  template <typename T> constexpr const bool is() const {
+    return as_if<T>() != nullptr;
   }
 };
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t::ptr_holder_t() {
+  data = new nbt_t<Str, Vec, Map>();
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t::~ptr_holder_t() {
+  delete data;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t::ptr_holder_t(
+    nbt_t<Str, Vec, Map> &&nbt) {
+  data = new nbt_t<Str, Vec, Map>();
+  *data = std::move(nbt);
+}
+
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t::ptr_holder_t(
+    const nbt_t<Str, Vec, Map> &nbt) {
+  data = new nbt_t<Str, Vec, Map>();
+  *data = nbt;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map> &
+nbt_t<Str, Vec, Map>::ptr_holder_t::operator*() {
+  return *data;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr const nbt_t<Str, Vec, Map> &
+nbt_t<Str, Vec, Map>::ptr_holder_t::operator*() const {
+  return *data;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t &
+nbt_t<Str, Vec, Map>::ptr_holder_t::operator=(const nbt_t<Str, Vec, Map> &nbt) {
+  *data = nbt_t<Str, Vec, Map>(nbt);
+  return *this;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t &
+nbt_t<Str, Vec, Map>::ptr_holder_t::operator=(nbt_t<Str, Vec, Map> &&nbt) {
+  *data = nbt_t<Str, Vec, Map>(std::move(nbt));
+  return *this;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t::ptr_holder_t(
+    const ptr_holder_t &nbt) {
+  data = new nbt_t<Str, Vec, Map>();
+  *data = *nbt.data;
+}
+template <typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr nbt_t<Str, Vec, Map>::ptr_holder_t &
+nbt_t<Str, Vec, Map>::ptr_holder_t::operator=(const ptr_holder_t &nbt) {
+  *data = *nbt.data;
+  return *this;
+}
+
+namespace binary {
+namespace details {
+template <typename T>
+concept IsDirectlyCopyable = requires(T a) {
+  { a.data() } -> ::std::same_as<typename T::value_type>;
+};
+
+template <typename T> struct copy_helper {
+  constexpr static void copy(const typename T::value_type *data,
+                             ::std::size_t size, T &res) {
+    if (size < sizeof(typename T::value_type) * res.size()) [[unlikely]]
+      throw ::std::out_of_range("out of range.");
+    for (::std::size_t i = 0; i < res.size(); i++)
+      res[i] = data[i];
+  }
+  constexpr static void copy(const unsigned char *data, ::std::size_t size,
+                             T &res) {
+    if (size < sizeof(typename T::value_type) * res.size()) [[unlikely]]
+      throw ::std::out_of_range("out of range.");
+    ::std::array<unsigned char, sizeof(typename T::value_type)> buffer;
+    for (::std::size_t i = 0; i < res.size(); i++) {
+      const auto begin_address = i * sizeof(typename T::value_type);
+      for (::std::size_t j = 0; j < sizeof(typename T::value_type); j++)
+        buffer[j] = data[begin_address + j];
+      res[i] = ::std::bit_cast<typename T::value_type>(buffer);
+    }
+  }
+};
+
+template <::libnbt::binary::details::IsDirectlyCopyable T>
+struct copy_helper<T> {
+  constexpr static void copy(const typename T::value_type *data,
+                             ::std::size_t size, T &res) {
+    if (size < sizeof(typename T::value_type) * res.size()) [[unlikely]]
+      throw ::std::out_of_range("out of range.");
+    if consteval {
+      for (::std::size_t i = 0; i < res.size(); i++)
+        res[i] = data[i];
+    } else {
+      ::std::memcpy(res.data(), data,
+                    sizeof(typename T::value_type) * res.size());
+    }
+  }
+  constexpr static void copy(const unsigned char *data, ::std::size_t size,
+                             T &res) {
+    if (size < sizeof(typename T::value_type) * res.size()) [[unlikely]]
+      throw ::std::out_of_range("out of range.");
+    if consteval {
+      ::std::array<unsigned char, sizeof(typename T::value_type)> buffer;
+      for (::std::size_t i = 0; i < res.size(); i++) {
+        const auto begin_address = i * sizeof(typename T::value_type);
+        for (::std::size_t j = 0; j < sizeof(typename T::value_type); j++)
+          buffer[j] = data[begin_address + j];
+        res[i] = ::std::bit_cast<typename T::value_type>(buffer);
+      }
+    } else {
+      ::std::memcpy(res.data(), data,
+                    sizeof(typename T::value_type) * res.size());
+    }
+  }
+};
+
+template <::std::endian E, typename T> struct read_number;
+template <::std::endian E, ::std::integral T> struct read_number<E, T> {
+  constexpr static T read(const unsigned char *buffer, ::std::size_t size) {
+    if (size >= sizeof(T)) [[likely]] {
+      ::std::array<unsigned char, sizeof(T)> value;
+      if consteval {
+        for (::std::size_t i = 0; i < sizeof(T); i++)
+          value[i] = buffer[i];
+      } else {
+        ::std::memcpy(value.data(), buffer, sizeof(T));
+      }
+      if (E == ::std::endian::native)
+        return ::std::bit_cast<T>(value);
+      else
+        return ::std::byteswap(::std::bit_cast<T>(value));
+    }
+    throw ::std::out_of_range("out of range.");
+  }
+};
+template <::std::endian E, ::std::floating_point T> struct read_number<E, T> {
+  constexpr static T read(const unsigned char *buffer, ::std::size_t size) {
+    if (size >= sizeof(T)) [[likely]] {
+      ::std::array<unsigned char, sizeof(T)> value;
+      if consteval {
+        for (::std::size_t i = 0; i < sizeof(T); i++)
+          value[i] = buffer[i];
+      } else {
+        ::std::memcpy(value.data(), buffer, sizeof(T));
+      }
+      if (E == ::std::endian::native)
+        return ::std::bit_cast<T>(value);
+      else {
+        ::std::reverse(value.begin(), value.end());
+        return ::std::bit_cast<T>(value);
+      }
+    }
+    throw ::std::out_of_range("out of range.");
+  }
+};
+
+template <::std::endian E, typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr ::std::size_t
+read_no_type(::libnbt::nbt_type type, nbt_t<Str, Vec, Map> &nbt,
+             const unsigned char *buffer, ::std::size_t size) {
+  using enum ::libnbt::nbt_type;
+  switch (type) {
+  case end:
+    break;
+#pragma push_macro("CASE")
+#undef CASE
+#define CASE(U)                                                                \
+  case U: {                                                                    \
+    typename nbt_t<Str, Vec, Map>::U##_t value;                                \
+    value = read_number<E, typename nbt_t<Str, Vec, Map>::U##_t>::read(buffer, \
+                                                                       size);  \
+    nbt = value;                                                               \
+  }                                                                            \
+    return sizeof(typename nbt_t<Str, Vec, Map>::U##_t)
+    CASE(i8);
+    CASE(i16);
+    CASE(i32);
+    CASE(i64);
+    CASE(f32);
+    CASE(f64);
+#undef CASE
+#define CASE(U)                                                                \
+  case U: {                                                                    \
+    ::std::int32_t length =                                                    \
+        read_number<E, ::std::int32_t>::read(buffer, size);                    \
+    buffer += sizeof(::std::int32_t);                                          \
+    if (size < length) [[unlikely]]                                            \
+      throw ::std::out_of_range("out of range.");                              \
+    size -= sizeof(::std::int32_t);                                            \
+    typename nbt_t<Str, Vec, Map>::U##_t value;                                \
+    value.resize(length);                                                      \
+    copy_helper<typename nbt_t<Str, Vec, Map>::U##_t>::copy(buffer, length,    \
+                                                            value);            \
+    nbt = value;                                                               \
+    return length * sizeof(typename nbt_t<Str, Vec, Map>::U##_t);              \
+  }
+    CASE(i8arr)
+    CASE(i32arr)
+    CASE(i64arr)
+#undef CASE
+#pragma pop_macro("CASE")
+  case arr: {
+    ::libnbt::nbt_type type = ::std::bit_cast<::libnbt::nbt_type>(buffer[0]);
+    buffer++;
+    size--;
+    ::std::int32_t length = read_number<E, ::std::int32_t>::read(buffer, size);
+    buffer += sizeof(::std::int32_t);
+    size -= sizeof(::std::int32_t);
+    ::std::size_t res_size = 1 + sizeof(::std::int32_t);
+    typename nbt_t<Str, Vec, Map>::arr_t value;
+    value.resize(length);
+    for (auto &nbt : value) {
+      auto element_size =
+          ::libnbt::binary::details::read_no_type<E>(type, *nbt, buffer, size);
+      buffer += element_size;
+      size -= element_size;
+      res_size += element_size;
+    }
+    return res_size;
+  }
+  case str: {
+    ::std::int16_t length = read_number<E, ::std::int16_t>::read(buffer, size);
+    buffer += sizeof(::std::int16_t);
+    size -= sizeof(::std::int16_t);
+    ::std::size_t res_size = sizeof(::std::int16_t);
+    typename nbt_t<Str, Vec, Map>::str_t value;
+    value.resize(length);
+    copy_helper<typename nbt_t<Str, Vec, Map>::str_t>::copy(buffer, size,
+                                                            value);
+    res_size += length;
+    return res_size;
+  }
+  case map: {
+    ::libnbt::nbt_type type = ::std::bit_cast<::libnbt::nbt_type>(buffer[0]);
+    buffer++;
+    size--;
+    ::std::size_t res_size = 1;
+    typename nbt_t<Str, Vec, Map>::map_t value;
+    while (type != end) {
+      ::std::int16_t length =
+          read_number<E, ::std::int16_t>::read(buffer, size);
+      buffer += sizeof(::std::int16_t);
+      size -= sizeof(::std::int16_t);
+      res_size += sizeof(::std::int16_t);
+      typename nbt_t<Str, Vec, Map>::str_t key;
+      key.resize(length);
+      copy_helper<typename nbt_t<Str, Vec, Map>::str_t>::copy(buffer, length,
+                                                              key);
+      buffer += length;
+      if (size < length) [[unlikely]]
+        throw ::std::out_of_range("out of range.");
+      size -= length;
+      res_size += length;
+      nbt_t<Str, Vec, Map> val;
+      auto element_size =
+          ::libnbt::binary::details::read_no_type<E>(type, val, buffer, size);
+      buffer += element_size;
+      size -= element_size;
+      res_size += element_size;
+      value.emplace(key, val);
+    }
+    res_size++;
+    return res_size;
+  }
+  }
+}
+} // namespace details
+template <::std::endian E, typename Str, template <typename> typename Vec,
+          template <typename, typename> typename Map>
+constexpr Str read(nbt_t<Str, Vec, Map> &nbt, const unsigned char *buffer,
+                   ::std::size_t size) {
+  if (size >= 1) [[likely]] {
+    auto type = ::std::bit_cast<::libnbt::nbt_type>(buffer[0]);
+    nbt_t<Str, Vec, Map> tmp;
+    ::libnbt::binary::details::read_no_type<E>(::libnbt::nbt_type::str, tmp,
+                                               buffer + 1, size - 1);
+    auto name = tmp.template as<Str>();
+    ::libnbt::binary::details::read_no_type<E>(
+        type, nbt, buffer + 1 + name.size(), size - 1 - name.size());
+    return name;
+  }
+  throw ::std::out_of_range("out of range.");
+}
+}; // namespace binary
 } // namespace libnbt
