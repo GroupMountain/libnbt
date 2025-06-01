@@ -630,6 +630,7 @@ read_no_type(::libnbt::nbt_type type, nbt_t<Str, Vec, Map> &nbt,
       size -= element_size;
       res_size += element_size;
       value.emplace(key, val);
+      type = ::std::bit_cast<::libnbt::nbt_type>(buffer[0]);
     }
     res_size++;
     return res_size;
